@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3PM Artist Toolkit</title>
+<style>
+body{font:1rem/1.55 system-ui,sans-serif;max-width:52rem;margin:3rem auto;padding:0 1rem;color:#172033;background:#f7f8fc}
+textarea{display:block;box-sizing:border-box;width:100%;min-height:18rem;margin:.5rem 0;padding:.75rem;font:inherit;font-family:monospace}
+button,input{font:inherit;margin:.25rem .5rem .25rem 0}
+article{background:white;padding:1rem 1.5rem;margin:1rem 0;border:1px solid #c5cbd8;border-radius:.5rem;overflow-wrap:anywhere}
+a{color:#2346a2}
+</style>
+<main>
+<h1>3PM Artist Toolkit</h1>
+<p>Create a press kit from portable release metadata. Your edits stay in this browser tab.</p>
+<label for="source">Press kit JSON</label>
+<textarea id="source" spellcheck="false"></textarea>
+<button id="preview" type="button">Update preview</button>
+<button id="export" type="button">Export JSON</button>
+<label>Import JSON <input id="import" type="file" accept=".json,application/json"></label>
+<p id="status" role="status"></p>
+<article id="kit" aria-label="Press kit preview"></article>
+</main>
+<script>
+'use strict';
+const source = document.querySelector('#source');
+const status = document.querySelector('#status');
+const kit = document.querySelector('#kit');
+
+function requiredText(value, label) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(label + ' must be non-empty text.');
+  return value.trim();
+}
+
+function parse(text) {
+  const data = JSON.parse(text);
+  if (data?.version !== 1 || !Array.isArray(data.releases) || !Array.isArray(data.links)) {
+    throw new Error('Use version 1 with releases and links arrays.');
+  }
+  return {
+    version: 1,
+    artist: requiredText(data.artist, 'Artist'),
+    bio: requiredText(data.bio, 'Biography'),
+    releases: data.releases.map((release) => ({
+      title: requiredText(release?.title, 'Release title'),
+      year: requiredText(release?.year, 'Release year')
+    })),
+    links: data.links.map((link) => {
+      const label = requiredText(link?.label, 'Link label');
+      const url = new URL(requiredText(link?.url, 'Link URL'));
+      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
+        throw new Error('Links must use HTTP or HTTPS without credentials.');
+      }
+      return { label, url: url.href };
+    })
+  };
+}
+
+function element(tag, text) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  return node;
+}
+
+function render(data) {
+  const releases = element('ul', '');
+  for (const {title, year} of data.releases) releases.append(element('li', title + ' (' + year + ')'));
+  const links = element('ul', '');
+  for (const {label, url} of data.links) {
+    const item = element('li', '');
+    const anchor = element('a', label);
+    anchor.href = url;
+    item.append(anchor);
+    links.append(item);
+  }
+  kit.replaceChildren(element('h2', data.artist), element('p', data.bio));
+  if (data.releases.length) kit.append(element('h3', 'Releases'), releases);
+  if (data.links.length) kit.append(element('h3', 'Links'), links);
+}
+
+function report(error) {
+  status.textContent = 'Could not process press kit. ' + error.message;
+}
+
+document.querySelector('#preview').addEventListener('click', () => {
+  try {
+    render(parse(source.value));
+    status.textContent = 'Preview updated.';
+  } catch (error) { report(error); }
+});
+
+document.querySelector('#import').addEventListener('change', async ({currentTarget}) => {
+  const file = currentTarget.files[0];
+  if (!file) return;
+  try {
+    const data = parse(await file.text());
+    source.value = JSON.stringify(data, null, 2);
+    render(data);
+    status.textContent = 'Press kit imported.';
+  } catch (error) { report(error); }
+  finally { currentTarget.value = ''; }
+});
+
+document.querySelector('#export').addEventListener('click', () => {
+  try {
+    const data = parse(source.value);
+    const file = new Blob([JSON.stringify(data, null, 2) + '\n'], {type:'application/json'});
+    const url = URL.createObjectURL(file);
+    const download = element('a', '');
+    download.href = url;
+    download.download = 'press-kit.json';
+    download.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = 'Press kit exported.';
+  } catch (error) { report(error); }
+});
+
+const example = {
+  version: 1,
+  artist: 'Harbour Static',
+  bio: 'A fictional independent artist blending field recordings with electronic production.',
+  releases: [{title: 'Low Tide Signals', year: '2026'}],
+  links: [{label: 'Example artist site', url: 'https://example.org/'}]
+};
+source.value = JSON.stringify(example, null, 2);
+render(example);
+</script>
+</html>
